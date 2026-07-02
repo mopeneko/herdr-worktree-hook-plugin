@@ -1,10 +1,10 @@
 id = "mopeneko.herdr-worktree-hook-plugin"
 name = "Worktree Hook"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.7.1"
 description = "Run custom commands during worktree operations"
 platforms = ["linux", "macos"]
 
 [[events]]
 on = "worktree.created"
-command = ["bun", "build/index.js"]
+command = ["node", "build/index.js"]

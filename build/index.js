@@ -1,6 +1,8 @@
-// @bun
 // index.ts
-var {spawn } = globalThis.Bun;
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // node_modules/smol-toml/dist/date.js
 /*!
@@ -245,7 +247,7 @@ function parseString(str, ptr) {
 ` || c === "\r" && str[i + 1] === `
 `)) {
       state = state && 3;
-    } else if (c < " " && c !== "\t" || c === "\x7F") {
+    } else if (c < " " && c !== "\t" || c === "") {
       throw new TomlError("control characters are not allowed in strings", {
         toml: str,
         ptr: i
@@ -416,7 +418,7 @@ function skipComment(str, ptr) {
     if (c === "\r" && str[i + 1] === `
 `)
       return i + 1;
-    if (c < " " && c !== "\t" || c === "\x7F") {
+    if (c < " " && c !== "\t" || c === "") {
       throw new TomlError("control characters are not allowed in comments", {
         toml: str,
         ptr
@@ -927,8 +929,6 @@ function parse(toml, { maxDepth = 1000, integersAsBigInt } = {}) {
  */
 
 // index.ts
-import { homedir } from "os";
-import { join } from "path";
 function expandHome(p) {
   if (p === "~")
     return homedir();
@@ -964,13 +964,12 @@ if (!configDir) {
   process.exit(1);
 }
 var configPath = join(configDir, "config.toml");
-var configFile = Bun.file(configPath);
-if (!await configFile.exists()) {
+if (!existsSync(configPath)) {
   process.exit(0);
 }
 var config;
 try {
-  config = parse(await configFile.text());
+  config = parse(readFileSync(configPath, "utf8"));
 } catch (err) {
   console.error(`Failed to parse ${configPath}: ${err}`);
   process.exit(1);
@@ -991,16 +990,17 @@ var hookEnv = {
 };
 for (const command of commands) {
   console.log(`$ ${command}`);
-  const proc = spawn({
-    cmd: ["/bin/sh", "-c", command],
+  const result = spawnSync("/bin/sh", ["-c", command], {
     cwd: worktreePath,
     env: hookEnv,
-    stdout: "inherit",
-    stderr: "inherit"
+    stdio: "inherit"
   });
-  const code = await proc.exited;
-  if (code !== 0) {
-    console.error(`postCreate hook failed with exit code ${code}: ${command}`);
-    process.exit(code ?? 1);
+  if (result.error) {
+    console.error(`Failed to spawn command: ${result.error.message}`);
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    console.error(`postCreate hook failed with exit code ${result.status}: ${command}`);
+    process.exit(result.status ?? 1);
   }
 }

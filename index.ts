@@ -1,13 +1,8 @@
-import { spawn } from "bun";
-import { parse as parseToml } from "smol-toml";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
-function expandHome(p: string): string {
-  if (p === "~") return homedir();
-  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
-  return p;
-}
+import { parse as parseToml } from "smol-toml";
 
 type WorktreeCreatedEvent = {
   event: string;
@@ -32,6 +27,12 @@ type RepoEntry = {
 type PluginConfig = {
   repos?: RepoEntry[];
 };
+
+function expandHome(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return join(homedir(), p.slice(2));
+  return p;
+}
 
 const raw = process.env.HERDR_PLUGIN_EVENT_JSON;
 if (!raw) {
@@ -67,14 +68,13 @@ if (!configDir) {
 }
 
 const configPath = join(configDir, "config.toml");
-const configFile = Bun.file(configPath);
-if (!(await configFile.exists())) {
+if (!existsSync(configPath)) {
   process.exit(0);
 }
 
 let config: PluginConfig;
 try {
-  config = parseToml(await configFile.text()) as PluginConfig;
+  config = parseToml(readFileSync(configPath, "utf8")) as PluginConfig;
 } catch (err) {
   console.error(`Failed to parse ${configPath}: ${err}`);
   process.exit(1);
@@ -101,16 +101,19 @@ const hookEnv = {
 
 for (const command of commands) {
   console.log(`$ ${command}`);
-  const proc = spawn({
-    cmd: ["/bin/sh", "-c", command],
+  const result = spawnSync("/bin/sh", ["-c", command], {
     cwd: worktreePath,
     env: hookEnv,
-    stdout: "inherit",
-    stderr: "inherit",
+    stdio: "inherit",
   });
-  const code = await proc.exited;
-  if (code !== 0) {
-    console.error(`postCreate hook failed with exit code ${code}: ${command}`);
-    process.exit(code ?? 1);
+  if (result.error) {
+    console.error(`Failed to spawn command: ${result.error.message}`);
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    console.error(
+      `postCreate hook failed with exit code ${result.status}: ${command}`,
+    );
+    process.exit(result.status ?? 1);
   }
 }

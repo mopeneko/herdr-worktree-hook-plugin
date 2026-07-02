@@ -60,7 +60,7 @@ The built entry point is invoked by herdr as declared in `herdr-plugin.toml`:
 ```toml
 [[events]]
 on = "worktree.created"
-command = ["bun", "build/index.js"]
+command = ["node", "build/index.js"]
 ```
 
 ## Platforms
