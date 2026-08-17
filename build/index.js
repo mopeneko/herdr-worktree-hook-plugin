@@ -1,7 +1,7 @@
 // index.ts
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 // node_modules/smol-toml/dist/date.js
@@ -988,19 +988,38 @@ var hookEnv = {
   WORKTREE_PATH: worktreePath,
   BRANCH: branch
 };
-for (const command of commands) {
-  console.log(`$ ${command}`);
-  const result = spawnSync("/bin/sh", ["-c", command], {
-    cwd: worktreePath,
-    env: hookEnv,
-    stdio: "inherit"
-  });
-  if (result.error) {
-    console.error(`Failed to spawn command: ${result.error.message}`);
-    process.exit(1);
+var pwdDir = mkdtempSync(join(tmpdir(), "herdr-hook-pwd-"));
+var pwdFile = join(pwdDir, "pwd");
+var cwd = worktreePath;
+var exitCode = 0;
+try {
+  for (const command of commands) {
+    console.log(`$ ${command}`);
+    const result = spawnSync("/bin/sh", ["-c", `trap 'printf %s "$PWD" > "$HERDR_HOOK_PWD_FILE"' EXIT
+${command}`], {
+      cwd,
+      env: { ...hookEnv, HERDR_HOOK_PWD_FILE: pwdFile },
+      stdio: "inherit"
+    });
+    try {
+      const recorded = readFileSync(pwdFile, "utf8").trim();
+      if (recorded)
+        cwd = recorded;
+    } catch {}
+    if (result.error) {
+      console.error(`Failed to spawn command: ${result.error.message}`);
+      exitCode = 1;
+      break;
+    }
+    if (result.status !== 0) {
+      console.error(`postCreate hook failed with exit code ${result.status}: ${command}`);
+      exitCode = result.status ?? 1;
+      break;
+    }
   }
-  if (result.status !== 0) {
-    console.error(`postCreate hook failed with exit code ${result.status}: ${command}`);
-    process.exit(result.status ?? 1);
-  }
+} finally {
+  rmSync(pwdDir, { recursive: true, force: true });
+}
+if (exitCode !== 0) {
+  process.exit(exitCode);
 }

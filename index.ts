@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 
@@ -99,21 +99,48 @@ const hookEnv = {
   BRANCH: branch,
 };
 
-for (const command of commands) {
-  console.log(`$ ${command}`);
-  const result = spawnSync("/bin/sh", ["-c", command], {
-    cwd: worktreePath,
-    env: hookEnv,
-    stdio: "inherit",
-  });
-  if (result.error) {
-    console.error(`Failed to spawn command: ${result.error.message}`);
-    process.exit(1);
-  }
-  if (result.status !== 0) {
-    console.error(
-      `postCreate hook failed with exit code ${result.status}: ${command}`,
+const pwdDir = mkdtempSync(join(tmpdir(), "herdr-hook-pwd-"));
+const pwdFile = join(pwdDir, "pwd");
+let cwd = worktreePath;
+let exitCode = 0;
+
+try {
+  for (const command of commands) {
+    console.log(`$ ${command}`);
+    const result = spawnSync(
+      "/bin/sh",
+      ["-c", `trap 'printf %s "$PWD" > "$HERDR_HOOK_PWD_FILE"' EXIT\n${command}`],
+      {
+        cwd,
+        env: { ...hookEnv, HERDR_HOOK_PWD_FILE: pwdFile },
+        stdio: "inherit",
+      },
     );
-    process.exit(result.status ?? 1);
+
+    try {
+      const recorded = readFileSync(pwdFile, "utf8").trim();
+      if (recorded) cwd = recorded;
+    } catch {
+      // Keep the previous cwd if the shell did not record PWD.
+    }
+
+    if (result.error) {
+      console.error(`Failed to spawn command: ${result.error.message}`);
+      exitCode = 1;
+      break;
+    }
+    if (result.status !== 0) {
+      console.error(
+        `postCreate hook failed with exit code ${result.status}: ${command}`,
+      );
+      exitCode = result.status ?? 1;
+      break;
+    }
   }
+} finally {
+  rmSync(pwdDir, { recursive: true, force: true });
+}
+
+if (exitCode !== 0) {
+  process.exit(exitCode);
 }
